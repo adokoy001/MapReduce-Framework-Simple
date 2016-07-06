@@ -43,12 +43,12 @@
       "runtime" : {
          "requires" : {
             "Data::MessagePack" : "0",
-            "LWP::UserAgent" : "0",
             "Mouse" : "0",
             "Parallel::ForkManager" : "0",
             "Plack" : "0",
             "Plack::Handler::Starlet" : "0",
             "Starlet" : "0",
+            "WWW::Mechanize" : "0",
             "perl" : "5.008001"
          }
       },
