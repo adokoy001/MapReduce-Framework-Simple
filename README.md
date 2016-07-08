@@ -75,6 +75,17 @@ You can start MapReduce worker server by one liner Perl.
 
 # METHODS
 
+## _new_
+
+_new_ creates object.
+
+    my $mfs->MapReduce::Framework::Simple->new(
+        verify_hostname => 1, # verify public key fingerprint.
+        skip_undef_result => 1, # skip undefined value at reduce step.
+        warn_discarded_data => 1, # warn if discarded data exist due to some connection problems.
+        die_discarded_data => 0 # die if discarded data exist.
+        );
+
 ## _map\_reduce_
 
 _map\_reduce_ method starts MapReduce processing using Parallel::ForkManager.

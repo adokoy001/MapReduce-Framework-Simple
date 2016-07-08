@@ -1,5 +1,5 @@
 package MapReduce::Framework::Simple;
-use 5.008001;
+use 5.010001;
 use strict;
 use warnings;
 use B::Deparse;
@@ -11,8 +11,11 @@ use Plack::Handler::Starlet;
 use WWW::Mechanize;
 
 has 'verify_hostname' => (is => 'rw', isa => 'Int', default => 1);
+has 'skip_undef_result' => (is => 'rw', isa => 'Int', default => 1);
+has 'warn_discarded_data' => (is => 'rw', isa => 'Int', default => 1);
+has 'die_discarded_data' => (is => 'rw', isa => 'Int', default => 0);
 
-our $VERSION = "0.01";
+our $VERSION = "0.02";
 
 # MapReduce client(Master)
 sub map_reduce {
@@ -26,20 +29,31 @@ sub map_reduce {
     if(defined($options) and defined($options->{remote})){
 	$remote_flg = $options->{remote};
     }
+    my $stringified_code = B::Deparse->new->coderef2text($mapper_ref);
     my $result;
+    my $succeeded_remotes;
+    my $failed_remotes;
+    my $failed_data;
+    my $discarded_data;
     my $pm = Parallel::ForkManager->new($max_proc);
     $pm->run_on_finish(
 	sub {
 	    my ($pid, $exit_code, $ident, $exit_signal, $core_dump, $data_structure) = @_;
 	    if (defined $data_structure) {
-		$result->[$data_structure->{id}] = $data_structure->{result};
+		if($data_structure->{is_success} == 1){
+		    $succeeded_remotes->{$data_structure->{remote}} = 1;
+		    $result->[$data_structure->{id}] = $data_structure->{result};
+		}else{
+		    $failed_remotes->{$data_structure->{remote}} = 1;
+		    push(@$failed_data,$data_structure->{failed_data});
+		    $result->[$data_structure->{id}] = undef;
+		}
 	    }
 	}
        );
     if($remote_flg == 1){
 	for(my $k=0; $k <= $#$data; $k++){
 	    $pm->start and next;
-	    my $stringified_code = B::Deparse->new->coderef2text($mapper_ref);
 	    my $payload = _perl_to_msgpack(
 		{
 		    data => $data->[$k]->[0],
@@ -52,20 +66,96 @@ sub map_reduce {
 		$payload,
 		$self->verify_hostname
 	       );
-	    my $result_chil = _msgpack_to_perl($result_chil_from_remote);
-	    my $result_with_id = {id => $k, result => $result_chil->{result}};
+	    my $result_with_id;
+	    if($result_chil_from_remote->{is_success}){
+		my $result_chil = _msgpack_to_perl($result_chil_from_remote->{res});
+		$result_with_id = {id => $k, result => $result_chil->{result}, remote => $data->[$k]->[1], is_success => 1};
+	    }else{
+		$result_with_id = {id => $k, remote => $data->[$k]->[0], is_success => 0, failed_data => $data->[$k]};
+	    }
 	    $pm->finish(0,$result_with_id);
 	}
     }else{
 	for(my $k=0; $k <= $#$data; $k++){
 	    $pm->start and next;
 	    my $result_chil = $mapper_ref->($data->[$k]);
-	    my $result_with_id = {id => $k, result => $result_chil};
+	    my $result_with_id = {id => $k, result => $result_chil, is_success => 1, remote => 'LOCAL'};
 	    $pm->finish(0,$result_with_id);
 	}
     }
     $pm->wait_all_children;
-    return($reducer_ref->($result));
+    my $result_failover;
+    if($remote_flg == 1 and $#$failed_data >= 0){
+	my @succeeded_remotes_list;
+	foreach my $key (keys %$succeeded_remotes){
+	    push(@succeeded_remotes_list,$key);
+	}
+	my $pm2 = Parallel::ForkManager->new($max_proc);
+	$pm2->run_on_finish(
+	    sub {
+		my ($pid, $exit_code, $ident, $exit_signal, $core_dump, $data_structure) = @_;
+		if (defined $data_structure) {
+		    if($data_structure->{is_success} == 1){
+			$succeeded_remotes->{$data_structure->{remote}} = 1;
+			$result_failover->[$data_structure->{id}] = $data_structure->{result};
+		    }else{
+			$failed_remotes->{$data_structure->{remote}} = 1;
+			push(@$discarded_data,$data_structure->{failed_data});
+			$result_failover->[$data_structure->{id}] = undef;
+		    }
+		}
+	    }
+	   );
+
+	for(my $k=0; $k <= $#$failed_data; $k++){
+	    $pm2->start and next;
+	    my $payload = _perl_to_msgpack(
+		{
+		    data => $failed_data->[$k]->[0],
+		    code => $stringified_code
+		   }
+	       );
+	    my $rand_remote = $succeeded_remotes_list[int(rand($#succeeded_remotes_list))];
+	    my $result_chil_from_remote = _post_content(
+		$rand_remote,
+		'application/x-msgpack; charset=x-user-defined',
+		$payload,
+		$self->verify_hostname
+	       );
+	    my $result_with_id;
+	    if($result_chil_from_remote->{is_success}){
+		my $result_chil = _msgpack_to_perl($result_chil_from_remote->{res});
+		$result_with_id = {id => $#$data + $k, result => $result_chil->{result}, remote => $rand_remote, is_success => 1};
+	    }else{
+		$result_with_id = {id => $#$data + $k, remote => $rand_remote, is_success => 0, failed_data => $failed_data->[$k]};
+	    }
+	    $pm2->finish(0,$result_with_id);
+	}
+	$pm2->wait_all_children;
+    }
+    my $result_merged;
+    push(@$result_merged,@$result);
+    if($#$result_failover >= 0){
+	push(@$result_merged,@$result_failover);
+    }
+    if($#$discarded_data >= 0){
+	if($self->die_discarded_data == 1){
+	    die "Fatal: Discarded data exist due to remote server couldn't process requested data.\n";
+	}elsif($self->warn_discarded_data == 1){
+	    warn "Warning: Discarded data exist.\n";
+	}
+    }
+    if($self->skip_undef_result == 1){
+	my $result_skip;
+	for(0 .. $#$result_merged){
+	    if(defined($result_merged->[$_])){
+		push(@$result_skip,$result_merged->[$_]);
+	    }
+	}
+	return($reducer_ref->($result_skip));
+    }else{
+	return($reducer_ref->($result_merged));
+    }
 }
 
 sub worker {
@@ -129,9 +219,15 @@ sub _post_content {
 	    verify_hostname => $ssl_opt
 	   }
        );
-    $ua->post($url,'Content-Type' => $content_type, Content => $data);
+    my $is_success = 1;
+    eval{
+	$ua->post($url,'Content-Type' => $content_type, Content => $data);
+    };
+    if($@){
+	$is_success = 0;
+    }
     my $res = $ua->content();
-    return $res;
+    return {res => $res, is_success => $is_success};
 }
 
 sub _perl_to_msgpack {
@@ -233,6 +329,17 @@ MapReduce::Framework::Simple is simple grid computing framework for MapReduce mo
 You can start MapReduce worker server by one liner Perl.
 
 =head1 METHODS
+
+=head2 I<new>
+
+I<new> creates object.
+
+    my $mfs->MapReduce::Framework::Simple->new(
+        verify_hostname => 1, # verify public key fingerprint.
+        skip_undef_result => 1, # skip undefined value at reduce step.
+        warn_discarded_data => 1, # warn if discarded data exist due to some connection problems.
+        die_discarded_data => 0 # die if discarded data exist.
+        );
 
 =head2 I<map_reduce>
 

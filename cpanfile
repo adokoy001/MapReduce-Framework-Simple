@@ -1,4 +1,4 @@
-requires 'perl', '5.008001';
+requires 'perl', '5.010001';
 requires 'Parallel::ForkManager', '0';
 requires 'Mouse', '0';
 requires 'Plack', '0';

@@ -13,7 +13,6 @@ for(1 .. 4){
     push(@$data_map_reduce,$tmp_data);
 }
 
-
 # mapper code
 my $mapper = sub {
     my $input = shift;
@@ -23,21 +22,20 @@ my $mapper = sub {
 	$sum += $input->[$_];
     }
     my $avg = $sum / $num;
-    return({avg => $avg, sum => $sum});
+    return({avg => $avg, sum => $sum, num => $num});
 };
 
 # reducer code
 my $reducer = sub {
     my $input = shift;
     my $sum = 0;
-    my $avg = 0;
-    my $num = $#$input + 1;
+    my $total_num = 0;
     for(0 .. $#$input){
 	$sum += $input->[$_]->{sum};
-	$avg += $input->[$_]->{avg};
+	$total_num += $input->[$_]->{num};
     }
-    $avg = $avg / $num;
-    return({avg => $avg, sum => $sum});
+    my $avg = $sum / $total_num;
+    return({avg => $avg, sum => $sum, num => $total_num});
 };
 
 my $result = $mfs->map_reduce(
@@ -50,6 +48,8 @@ my $result = $mfs->map_reduce(
 
 cmp_ok($result->{sum},'==', 22000, 'SUM ok');
 cmp_ok($result->{avg},'==', 5.5, 'AVG ok');
+cmp_ok($result->{num},'==', 4000, 'NUM ok');
+
 
 done_testing;
 
