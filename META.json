@@ -59,5 +59,16 @@
       }
    },
    "release_status" : "unstable",
+   "resources" : {
+      "bugtracker" : {
+         "web" : "https://github.com/adokoy001/MapReduce-Framework-Simple/issues"
+      },
+      "homepage" : "https://github.com/adokoy001/MapReduce-Framework-Simple",
+      "repository" : {
+         "type" : "git",
+         "url" : "git://github.com/adokoy001/MapReduce-Framework-Simple.git",
+         "web" : "https://github.com/adokoy001/MapReduce-Framework-Simple"
+      }
+   },
    "version" : "0.01"
 }

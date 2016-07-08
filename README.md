@@ -32,7 +32,7 @@ MapReduce::Framework::Simple - Simple Framework for MapReduce
             $sum += $input->[$_];
         }
         my $avg = $sum / $num;
-        return({avg => $avg, sum => $sum});
+        return({avg => $avg, sum => $sum, num => $num});
     };
 
     # reducer code
@@ -40,12 +40,12 @@ MapReduce::Framework::Simple - Simple Framework for MapReduce
         my $input = shift;
         my $sum = 0;
         my $avg = 0;
-        my $num = $#$input + 1;
+        my $total_num = 0;
         for(0 .. $#$input){
             $sum += $input->[$_]->{sum};
-            $avg += $input->[$_]->{avg};
+            $total_num += $input->[$_]->{num};
         }
-        $avg = $avg / $num;
+        $avg = $sum / $total_num;
         return({avg => $avg, sum => $sum});
     };
 
