@@ -1,3 +1,4 @@
+[![Build Status](https://travis-ci.org/adokoy001/MapReduce-Framework-Simple.svg?branch=master)](https://travis-ci.org/adokoy001/MapReduce-Framework-Simple)
 # NAME
 
 MapReduce::Framework::Simple - Simple Framework for MapReduce

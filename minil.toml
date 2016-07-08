@@ -1,4 +1,4 @@
 name = "MapReduce-Framework-Simple"
-# badges = ["travis"]
+badges = ["travis"]
 module_maker="ModuleBuildTiny"
 
