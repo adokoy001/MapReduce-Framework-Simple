@@ -2,6 +2,10 @@ Revision history for Perl extension MapReduce-Framework-Simple
 
 {{$NEXT}}
 
+0.02 2016-07-08T19:18:39Z
+
+    - Add failover function
+
 0.01 2016-07-06T03:54:06Z
 
     - original version
