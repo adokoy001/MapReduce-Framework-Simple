@@ -46,8 +46,7 @@
             "Mouse" : "0",
             "Parallel::ForkManager" : "0",
             "Plack" : "0",
-            "Plack::Handler::Starlet" : "0",
-            "Starlet" : "0",
+            "Plack::Runner" : "0",
             "WWW::Mechanize" : "0",
             "perl" : "5.010001"
          }
@@ -70,5 +69,5 @@
          "web" : "https://github.com/adokoy001/MapReduce-Framework-Simple"
       }
    },
-   "version" : "0.02"
+   "version" : "0.03"
 }

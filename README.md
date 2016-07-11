@@ -101,7 +101,7 @@ _map\_reduce_ method starts MapReduce processing using Parallel::ForkManager.
 
 ## _worker_
 
-_worker_ method starts MapReduce worker server using Starlet HTTP server over Plack.
+_worker_ method starts MapReduce worker server using Starlet HTTP server over Plack when Starlet and Plack::Handler::Starlet is installed (or not, startup by single process plack server)
 
 Warning: Worker server do eval remote code. Please use this server at secure network.
 

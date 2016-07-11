@@ -7,7 +7,6 @@ use Mouse;
 use Data::MessagePack;
 use Parallel::ForkManager;
 use Plack::Request;
-use Plack::Handler::Starlet;
 use WWW::Mechanize;
 
 has 'verify_hostname' => (is => 'rw', isa => 'Int', default => 1);
@@ -15,7 +14,7 @@ has 'skip_undef_result' => (is => 'rw', isa => 'Int', default => 1);
 has 'warn_discarded_data' => (is => 'rw', isa => 'Int', default => 1);
 has 'die_discarded_data' => (is => 'rw', isa => 'Int', default => 0);
 
-our $VERSION = "0.02";
+our $VERSION = "0.03";
 
 # MapReduce client(Master)
 sub map_reduce {
@@ -169,14 +168,26 @@ sub worker {
     unless(defined($port)){
 	$port = 5000;
     }
-    print "Starting MapReduce Framework Worker by Starlet\n";
-    print "Path: $path\nPort: $port\n";
-    my $app = $self->load_worker_plack_app($path);
-    my $handler = Plack::Handler::Starlet->new(
-	max_worker => $worker,
-	port => $port
-       );
-    $handler->run($app);
+    my $rc = eval{
+	require Plack::Handler::Starlet;
+	1;
+    };
+    if($rc){
+	print "Starting MapReduce Framework Worker by Starlet\n";
+	print "Path: $path\nPort: $port\n";
+	my $app = $self->load_worker_plack_app($path);
+	my $handler = Plack::Handler::Starlet->new(
+	    max_worker => $worker,
+	    port => $port
+	   );
+	$handler->run($app);
+    }else{
+	require Plack::Runner;
+	my $runner = Plack::Runner->new;
+	print "Starting MapReduce Framework Worker by plackup\n";
+	my $app = $self->load_worker_plack_app($path);
+	$runner->run($app);
+    }
 }
 
 sub load_worker_plack_app {
@@ -355,7 +366,7 @@ I<map_reduce> method starts MapReduce processing using Parallel::ForkManager.
 
 =head2 I<worker>
 
-I<worker> method starts MapReduce worker server using Starlet HTTP server over Plack.
+I<worker> method starts MapReduce worker server using Starlet HTTP server over Plack when Starlet and Plack::Handler::Starlet is installed (or not, startup by single process plack server)
 
 Warning: Worker server do eval remote code. Please use this server at secure network.
 
