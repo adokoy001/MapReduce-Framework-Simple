@@ -71,7 +71,11 @@ MapReduce::Framework::Simple - Simple Framework for MapReduce
 # DESCRIPTION
 
 MapReduce::Framework::Simple is simple grid computing framework for MapReduce model.
+MapReduce is a better programming model for solving highly parallelizable problems like a word-count from large number of documents.
 
+The model requires Map procedure that processes given data with given sub-routine(code reference) parallelly and Reduce procedure that summarizes outputs from Map sub-routine.
+
+This module provides worker server that just computes perl-code and data sent from remote client.
 You can start MapReduce worker server by one liner Perl.
 
 # METHODS
@@ -85,6 +89,8 @@ _new_ creates object.
         skip_undef_result => 1, # skip undefined value at reduce step.
         warn_discarded_data => 1, # warn if discarded data exist due to some connection problems.
         die_discarded_data => 0 # die if discarded data exist.
+        worker_log => 0 # print worker log when remote client accesses.
+        force_plackup => 0 # force to use plackup when starting worker server.
         );
 
 ## _map\_reduce_
@@ -101,7 +107,8 @@ _map\_reduce_ method starts MapReduce processing using Parallel::ForkManager.
 
 ## _worker_
 
-_worker_ method starts MapReduce worker server using Starlet HTTP server over Plack when Starlet and Plack::Handler::Starlet is installed (or not, startup by single process plack server)
+_worker_ method starts MapReduce worker server using Starlet HTTP server over Plack when Starlet and Plack::Handler::Starlet is installed (or not, startup by single process plack server).
+If you need to startup worker as plackup on the environment that has Starlet installed, please set force\_plackup => 1 when _new_.
 
 Warning: Worker server do eval remote code. Please use this server at secure network.
 
@@ -113,7 +120,7 @@ Warning: Worker server do eval remote code. Please use this server at secure net
 
 ## _load\_worker\_plack\_app_
 
-If you want to use other HTTP server, you can extract Plack app by _load\_worker\_plack\_app_ method
+If you want to use other HTTP server, you can extract Plack app by _load\_worker\_plack\_app_ method.
 
     use Plack::Loader;
     my $app = $mfs->load_worker_plack_app("/yoursecret_eval_path");
@@ -122,6 +129,24 @@ If you want to use other HTTP server, you can extract Plack app by _load\_worker
            ANY => 'FOO'
            );
     $handler->run($app);
+
+# EFFECTIVENESS
+
+Sometimes we regret things we design the programs and routines that process small data.
+
+Please check the current design when you convert to MapReduce model.
+
+## Is this procedure parallelizable?
+
+The problem that you want to solve should be highly-parallelizable if you convert to MapReduce model.
+
+## Are there data size predictable?
+
+If these data size assined to workers are not predictable, acceleration of computing by converting to MapReduce model can not be expected because each workers has unevenness amount of tasks and actual processing time.
+
+## Is overhead relatively small?
+
+Please read some documents related to "Amdahl's law" and "embarrassingly parallel".
 
 # LICENSE
 
@@ -132,4 +157,4 @@ it under the same terms as Perl itself.
 
 # AUTHOR
 
-Toshiaki Yokoda <adokoy001@gmail.com>
+Toshiaki Yokoda &lt;adokoy001@gmail.com>

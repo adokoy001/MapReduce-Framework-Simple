@@ -9,12 +9,14 @@ use Parallel::ForkManager;
 use Plack::Request;
 use WWW::Mechanize;
 
+our $VERSION = "0.04";
+
 has 'verify_hostname' => (is => 'rw', isa => 'Int', default => 1);
 has 'skip_undef_result' => (is => 'rw', isa => 'Int', default => 1);
 has 'warn_discarded_data' => (is => 'rw', isa => 'Int', default => 1);
 has 'die_discarded_data' => (is => 'rw', isa => 'Int', default => 0);
-
-our $VERSION = "0.03";
+has 'worker_log' => (is => 'rw', isa => 'Int', default => 0);
+has 'force_plackup' => (is => 'rw', isa => 'Int', default => 0);
 
 # MapReduce client(Master)
 sub map_reduce {
@@ -172,7 +174,7 @@ sub worker {
 	require Plack::Handler::Starlet;
 	1;
     };
-    if($rc){
+    if($rc and $self->force_plackup == 0){
 	print "Starting MapReduce Framework Worker by Starlet\n";
 	print "Path: $path\nPort: $port\n";
 	my $app = $self->load_worker_plack_app($path);
@@ -196,6 +198,15 @@ sub load_worker_plack_app {
     my $app = sub {
 	my $env = shift;
 	my $req = Plack::Request->new($env);
+	if($self->worker_log == 1){
+	    print "REQ,$$,".$req->address.',';
+	    my @tar = localtime(time());
+	    printf(
+		"%04d-%02d-%02d %02d:%02d:%02d",
+		$tar[5]+1900,$tar[4]+1,$tar[3],$tar[2],$tar[1],$tar[0]
+	       );
+	    print "\n";
+	}
 	my $response = {
 	    $path => sub {
 		my $msg_req = $req->content //
@@ -210,11 +221,21 @@ sub load_worker_plack_app {
 		return [200,['Content-Type' => 'application/x-msgpack; charset=x-user-defined'],[_perl_to_msgpack({result => $result})]];
 	    }
 	   };
+	if($self->worker_log == 1){
+	    print "END,$$,".$req->address.',';
+	    my @tar = localtime(time());
+	    printf(
+		"%04d-%02d-%02d %02d:%02d:%02d",
+		$tar[5]+1900,$tar[4]+1,$tar[3],$tar[2],$tar[1],$tar[0]
+	       );
+	    print "\n";
+	}
 	if(defined($response->{$env->{PATH_INFO}})){
 	    return $response->{$env->{PATH_INFO}}->();
 	}else{
 	    return [404,['Content-Type' => 'text/plain'],['Not Found']];
 	}
+
     };
     return($app);
 }
@@ -336,7 +357,11 @@ MapReduce::Framework::Simple - Simple Framework for MapReduce
 =head1 DESCRIPTION
 
 MapReduce::Framework::Simple is simple grid computing framework for MapReduce model.
+MapReduce is a better programming model for solving highly parallelizable problems like a word-count from large number of documents.
 
+The model requires Map procedure that processes given data with given sub-routine(code reference) parallelly and Reduce procedure that summarizes outputs from Map sub-routine.
+
+This module provides worker server that just computes perl-code and data sent from remote client.
 You can start MapReduce worker server by one liner Perl.
 
 =head1 METHODS
@@ -350,6 +375,8 @@ I<new> creates object.
         skip_undef_result => 1, # skip undefined value at reduce step.
         warn_discarded_data => 1, # warn if discarded data exist due to some connection problems.
         die_discarded_data => 0 # die if discarded data exist.
+        worker_log => 0 # print worker log when remote client accesses.
+        force_plackup => 0 # force to use plackup when starting worker server.
         );
 
 =head2 I<map_reduce>
@@ -366,7 +393,8 @@ I<map_reduce> method starts MapReduce processing using Parallel::ForkManager.
 
 =head2 I<worker>
 
-I<worker> method starts MapReduce worker server using Starlet HTTP server over Plack when Starlet and Plack::Handler::Starlet is installed (or not, startup by single process plack server)
+I<worker> method starts MapReduce worker server using Starlet HTTP server over Plack when Starlet and Plack::Handler::Starlet is installed (or not, startup by single process plack server).
+If you need to startup worker as plackup on the environment that has Starlet installed, please set force_plackup => 1 when I<new>.
 
 Warning: Worker server do eval remote code. Please use this server at secure network.
 
@@ -378,7 +406,7 @@ Warning: Worker server do eval remote code. Please use this server at secure net
 
 =head2 I<load_worker_plack_app>
 
-If you want to use other HTTP server, you can extract Plack app by I<load_worker_plack_app> method
+If you want to use other HTTP server, you can extract Plack app by I<load_worker_plack_app> method.
 
     use Plack::Loader;
     my $app = $mfs->load_worker_plack_app("/yoursecret_eval_path");
@@ -387,6 +415,25 @@ If you want to use other HTTP server, you can extract Plack app by I<load_worker
            ANY => 'FOO'
            );
     $handler->run($app);
+
+=head1 EFFECTIVENESS
+
+Sometimes we regret things we design the programs and routines that process small data.
+
+Please check the current design when you convert to MapReduce model.
+
+=head2 Is this procedure parallelizable?
+
+The problem that you want to solve should be highly-parallelizable if you convert to MapReduce model.
+
+=head2 Are there data size predictable?
+
+If these data size assined to workers are not predictable, acceleration of computing by converting to MapReduce model can not be expected because each workers has unevenness amount of tasks and actual processing time.
+
+=head2 Is overhead relatively small?
+
+Please read some documents related to "Amdahl's law" and "embarrassingly parallel".
+
 
 =head1 LICENSE
 
