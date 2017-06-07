@@ -179,7 +179,7 @@ sub worker {
 	print "Path: $path\nPort: $port\n";
 	my $app = $self->load_worker_plack_app($path);
 	my $handler = Plack::Handler::Starlet->new(
-	    max_worker => $worker,
+	    max_workers => $worker,
 	    port => $port
 	   );
 	$handler->run($app);
