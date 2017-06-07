@@ -9,7 +9,7 @@ use Parallel::ForkManager;
 use Plack::Request;
 use WWW::Mechanize;
 
-our $VERSION = "0.04";
+our $VERSION = "0.05";
 
 has 'verify_hostname' => (is => 'rw', isa => 'Int', default => 1);
 has 'skip_undef_result' => (is => 'rw', isa => 'Int', default => 1);
