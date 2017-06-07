@@ -157,4 +157,4 @@ it under the same terms as Perl itself.
 
 # AUTHOR
 
-Toshiaki Yokoda &lt;adokoy001@gmail.com>
+Toshiaki Yokoda <adokoy001@gmail.com>
