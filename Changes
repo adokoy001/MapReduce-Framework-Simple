@@ -1,6 +1,7 @@
 Revision history for Perl extension MapReduce-Framework-Simple
 
 {{$NEXT}}
+    - Add create_assigned_data method.
 
 0.05 2017-06-07T12:46:51Z
     - Fix Starlet max_workers parameter typo.
