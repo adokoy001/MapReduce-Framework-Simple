@@ -1,6 +1,8 @@
 Revision history for Perl extension MapReduce-Framework-Simple
 
 {{$NEXT}}
+
+0.07 2017-06-12T04:19:02Z
     - Fix plackup port bug. Add explanation.
 
 0.06 2017-06-08T13:40:41Z
