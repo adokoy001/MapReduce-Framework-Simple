@@ -18,6 +18,11 @@ has 'warn_discarded_data' => (is => 'rw', isa => 'Int', default => 1);
 has 'die_discarded_data' => (is => 'rw', isa => 'Int', default => 0);
 has 'worker_log' => (is => 'rw', isa => 'Int', default => 0);
 has 'force_plackup' => (is => 'rw', isa => 'Int', default => 0);
+has 'server_spec' => (is => 'rw', isa => 'HashRef', default => sub{{cores => 1, clock => 2000, mem => 1}});
+has 'worker_num' => (is => 'rw', isa => 'Int', default => 1);
+has 'port' => (is => 'rw', isa => 'Int', default => 5000);
+has 'path' => (is => 'rw', isa => 'Str', default => '/eval');
+
 
 # To make load balanced data.
 sub create_assigned_data {
@@ -51,6 +56,73 @@ sub create_assigned_data {
 	}
 	for(0 .. $#$output){
 	    $output->[$_]->[1] = $servers->[$_ % scalar(@$servers)];
+	}
+    }elsif($method eq 'element_server_cores'){
+	@$data = shuffle(@$data);
+	my $server_spec = $self->check_server_spec($servers);
+	my $tmp_server_list;
+	foreach my $key (keys %$server_spec){
+	    push(@$tmp_server_list,$key);
+	    for(2 .. $server_spec->{$key}->{server_spec}->{cores}){
+		push(@$tmp_server_list,$key);
+	    }
+	}
+	for(0 .. $#$data){
+	    push(@{$output->[$_ % scalar(@$tmp_server_list)]->[0]},$data->[$_]);
+	}
+	for(0 .. $#$output){
+	    $output->[$_]->[1] = $tmp_server_list->[$_ % scalar(@$tmp_server_list)];
+	}
+    }elsif($method eq 'element_server_workers'){
+	@$data = shuffle(@$data);
+	my $server_spec = $self->check_server_spec($servers);
+	my $tmp_server_list;
+	foreach my $key (keys %$server_spec){
+	    push(@$tmp_server_list,$key);
+	    for(2 .. $server_spec->{$key}->{server_spec}->{worker_num}){
+		push(@$tmp_server_list,$key);
+	    }
+	}
+	for(0 .. $#$data){
+	    push(@{$output->[$_ % scalar(@$tmp_server_list)]->[0]},$data->[$_]);
+	}
+	for(0 .. $#$output){
+	    $output->[$_]->[1] = $tmp_server_list->[$_ % scalar(@$tmp_server_list)];
+	}
+    }elsif($method eq 'element_server_core_clock'){
+	@$data = shuffle(@$data);
+	my $server_spec = $self->check_server_spec($servers);
+	my $tmp_server_list;
+
+	my $tmp_max_cc = 0;
+	my $tmp_min_cc = 1_000_000_000_000;
+	foreach my $key (keys %$server_spec){
+	    my $tmp_cc = ($server_spec->{$key}->{server_spec}->{cores} + 0.0001)
+		* ($server_spec->{$key}->{server_spec}->{clock} + 0.0001);
+	    if($tmp_max_cc < $tmp_cc){
+		$tmp_max_cc = $tmp_cc;
+	    }
+	    if($tmp_min_cc > $tmp_cc){
+		$tmp_min_cc = $tmp_cc;
+	    }
+	}
+
+	my $pre_ratio = ((log($tmp_max_cc) / log(10))+(log($tmp_max_cc) / log(10)));
+	my $ratio = 1/ 10 ** int($pre_ratio / 2);
+	foreach my $key (keys %$server_spec){
+	    push(@$tmp_server_list,$key);
+	    my $tmp_cc = $server_spec->{$key}->{server_spec}->{cores}
+		* $server_spec->{$key}->{server_spec}->{clock};
+	    my $add_num = int($tmp_cc * $ratio);
+	    for(2 .. $add_num){
+		push(@$tmp_server_list,$key);
+	    }
+	}
+	for(0 .. $#$data){
+	    push(@{$output->[$_ % scalar(@$tmp_server_list)]->[0]},$data->[$_]);
+	}
+	for(0 .. $#$output){
+	    $output->[$_]->[1] = $tmp_server_list->[$_ % scalar(@$tmp_server_list)];
 	}
     }else{
 	my $mp = Data::MessagePack->new();
@@ -213,12 +285,19 @@ sub worker {
     my $path = shift;
     my $worker = shift;
     my $port = shift;
+
+    $self->{path} = $path;
+
     unless(defined($worker)){
 	$worker = 4;
     }
+    $self->{worker_num} = $worker;
+
     unless(defined($port)){
 	$port = 5000;
     }
+    $self->{port} = $port;
+
     my $rc = eval{
 	require Plack::Handler::Starlet;
 	1;
@@ -233,6 +312,7 @@ sub worker {
 	   );
 	$handler->run($app);
     }else{
+	$self->{worker_num} = 1;
 	require Plack::Runner;
 	my $runner = Plack::Runner->new;
 	print "Starting MapReduce Framework Worker by plackup. The number of workers will be ignored.\n";
@@ -270,6 +350,14 @@ sub load_worker_plack_app {
 		eval('$code_ref = sub '.$code_text.';');
 		my $result = $code_ref->($data);
 		return [200,['Content-Type' => 'application/x-msgpack; charset=x-user-defined'],[_perl_to_msgpack({result => $result})]];
+	    },
+	    $path.'/server_spec' => sub {
+		my $server_spec = $self->{server_spec};
+		$server_spec->{worker_num} = $self->{worker_num};
+		$server_spec->{port} = $self->{port};
+		$server_spec->{path} = $self->{path};
+
+		return [200,['Content-Type' => 'application/x-msgpack; charset=x-user-defined'],[_perl_to_msgpack({server_spec => $server_spec})]];
 	    }
 	   };
 	if($self->worker_log == 1){
@@ -291,6 +379,24 @@ sub load_worker_plack_app {
     return($app);
 }
 
+sub check_server_spec {
+    my $self = shift;
+    my $server_list = shift;
+    my $output;
+    for(my $k=0; $k <= $#$server_list; $k++){
+	my $result_chil_from_remote = _post_content(
+	    $server_list->[$k] . '/server_spec',
+	    'application/x-msgpack; charset=x-user-defined',
+	    '',
+	    $self->verify_hostname
+	   );
+	if($result_chil_from_remote->{is_success}){
+	    my $tmp_spec = _msgpack_to_perl($result_chil_from_remote->{res});
+	    $output->{$server_list->[$k]} = $tmp_spec;
+	}
+    }
+    return $output;
+}
 
 sub _post_content {
     my $url = shift;
