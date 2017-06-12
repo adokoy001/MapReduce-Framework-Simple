@@ -1,6 +1,7 @@
 Revision history for Perl extension MapReduce-Framework-Simple
 
 {{$NEXT}}
+    - Fix plackup port bug. Add explanation.
 
 0.06 2017-06-08T13:40:41Z
     - Add create_assigned_data method.
