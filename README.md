@@ -7,6 +7,8 @@ MapReduce::Framework::Simple - Simple Framework for MapReduce
 
     ## After install this module, you can start MapReduce worker server by this command.
     ## $ perl -MMapReduce::Framework::Simple -e 'MapReduce::Framework::Simple->new->worker("/eval");'
+    ## Prefork HTTP server module "Starlet" is highly recommended for practical uses.
+
     use MapReduce::Framework::Simple;
     use Data::Dumper;
 
@@ -95,6 +97,7 @@ The model requires Map procedure that processes given data with given sub-routin
 
 This module provides worker server that just computes perl-code and data sent from remote client.
 You can start MapReduce worker server by one liner Perl.
+Pre-fork HTTP server module "Starlet" will be loaded automatically if it is installed. Starlet installed environment is highly recommended for practical uses.
 
 # METHODS
 
@@ -146,7 +149,7 @@ _map\_reduce_ method starts MapReduce processing using Parallel::ForkManager.
 
 ## _worker_
 
-_worker_ method starts MapReduce worker server using Starlet HTTP server over Plack when Starlet and Plack::Handler::Starlet is installed (or not, startup by single process plack server).
+_worker_ method starts MapReduce worker server using Starlet HTTP server over Plack when Starlet is installed (or not, startup by single process plack server. It is not for practical uses).
 If you need to startup worker as plackup on the environment that has Starlet installed, please set force\_plackup => 1 when _new_.
 
 Warning: Worker server do eval remote code. Please use this server at secure network.
@@ -168,6 +171,111 @@ If you want to use other HTTP server, you can extract Plack app by _load\_worker
            ANY => 'FOO'
            );
     $handler->run($app);
+
+Example one liner deploy code below (with Starlight the pure Perl pre-fork HTTP server).
+
+    $ perl -MMapReduce::Framework::Simple -MPlack::Loader -e 'Plack::Loader->load("Starlight", port => 12345)->run(MapReduce::Framework::Simple->new->load_worker_plack_app("/eval_secret"))'
+
+# PERFORMANCE
+
+This methodology is suitable for Highly-Parallelizable problems.
+
+## Example: Summation of prime numbers
+
+Normally, we calculate the summation of prime numbers in 1,000,000,001 to 1,000,300,000 like below.
+
+    use strict;
+    use warnings;
+
+    my $num_list = [1_000_000_001 .. 1_000_300_000];
+    my $sum=0;
+    for(@$num_list){
+        my $flag = 0;
+        for( my $k=2; $k <= int(sqrt($_)); $k++){
+            if(($_ % $k) == 0){
+                $flag = 1;
+                last;
+            }
+        }
+        if($flag == 0){
+            $sum += $_;
+        }
+    }
+
+    print "$sum\n";
+
+I guess this problem will be solved around 1 minute after execute this program.
+
+Here is parallel processing version of this program by using this module. It might be solved in 10 seconds.
+
+    use strict;
+    use warnings;
+    use MapReduce::Framework::Simple;
+
+    my $mfs = MapReduce::Framework::Simple->new(
+        skip_undef_result => 0,
+        warn_discarded_data => 1
+       );
+
+    my $server_list = [
+        'http://remote1.example.com:5000/eval', # 20 cores over remote server.
+        'http://remote2.example.com:5000/eval', # 20 cores over remote server.
+       ];
+
+    my $data_tmp;
+
+    my $parallel_num = 10;
+    for (1_000_000_001 .. 1_000_300_000){
+        push(@$data_tmp,$_);
+    }
+
+    my $data = $mfs->create_assigned_data(
+        $data_tmp,
+        $server_list,
+        {
+            chunk_num => 40,
+            method => 'element_shuffle'
+           }
+       );
+
+    # mapper code
+    my $mapper = sub {
+        my $input = shift;
+        my $sum=0;
+        for(0 .. $#$input){
+            my $flag = 0;
+            for( my $k=2; $k <= int(sqrt($input->[$_])); $k++){
+                if(($input->[$_] % $k) == 0){
+                    $flag = 1;
+                    last;
+                }
+            }
+            if($flag == 0){
+                $sum += $input->[$_];
+            }
+        }
+        return($sum);
+    };
+
+    # reducer code
+    my $reducer = sub {
+        my $input = shift;
+        my $sum=0;
+        foreach my $tmp_input (@$input){
+            $sum += $tmp_input;
+        }
+        return($sum);
+    };
+
+    my $result = $mfs->map_reduce(
+        $data,
+        $mapper,
+        $reducer,
+        $parallel_num,
+        {remote => 1}
+       );
+
+    print "$result\n";
 
 # EFFECTIVENESS
 
