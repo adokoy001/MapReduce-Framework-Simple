@@ -119,6 +119,8 @@ _new_ creates object.
 This method creates MapReduce ready data from data and remote worker server list.
 You can set the number of data chunk and balancing method ('volume\_uniform','element\_shuffle','element\_sequential').
 
+Note: Version >= 0.08, new available method 'element\_server\_cores','element\_server\_workers','element\_server\_core\_clock'
+
     my $tmp_data = [1 .. 1_000_000];
     my $server_list = [
         'http://s1.local:5000/eval',
@@ -134,6 +136,33 @@ You can set the number of data chunk and balancing method ('volume\_uniform','el
             method => 'volume_uniform', # balancing method.
            }
        );
+
+### Assign method options
+
+The explanation of assign method below.
+
+#### _volume\_uniform_ (default)
+
+This option balances by data size. Default option.
+
+#### _element\_shuffle_
+
+This option assigns data to workers by random.
+
+#### _element\_sequential_
+
+This option assigns data to workers sequentially.
+
+#### _element\_server\_cores_, _element\_server\_workers_, _element\_server\_core\_clock_
+
+These options are available over v0.08.
+
+It requires worker side preparation to notice server specification for client like below.
+
+    $ perl -MMapReduce::Framework::Simple -e 'MapReduce::Framework::Simple->new(server_spec => {cores => 4, clock => 2400})->worker("/eval",10,5000)'
+
+Please give correct server specification in new(server\_spec => {}) when you use 'element\_server\_cores' or 'element\_server\_core\_clock'.
+Then you can distribute the data by computing power of workers.
 
 ## _map\_reduce_
 

@@ -10,7 +10,7 @@ use Plack::Request;
 use WWW::Mechanize;
 use List::Util qw(shuffle);
 
-our $VERSION = "0.07";
+our $VERSION = "0.08";
 
 has 'verify_hostname' => (is => 'rw', isa => 'Int', default => 1);
 has 'skip_undef_result' => (is => 'rw', isa => 'Int', default => 1);
@@ -562,6 +562,8 @@ I<new> creates object.
 This method creates MapReduce ready data from data and remote worker server list.
 You can set the number of data chunk and balancing method ('volume_uniform','element_shuffle','element_sequential').
 
+Note: Version >= 0.08, new available method 'element_server_cores','element_server_workers','element_server_core_clock'
+
     my $tmp_data = [1 .. 1_000_000];
     my $server_list = [
         'http://s1.local:5000/eval',
@@ -577,6 +579,34 @@ You can set the number of data chunk and balancing method ('volume_uniform','ele
             method => 'volume_uniform', # balancing method.
            }
        );
+
+
+=head3 Assign method options
+
+The explanation of assign method below.
+
+=head4 I<volume_uniform> (default)
+
+This option balances by data size. Default option.
+
+=head4 I<element_shuffle>
+
+This option assigns data to workers by random.
+
+=head4 I<element_sequential>
+
+This option assigns data to workers sequentially.
+
+=head4 I<element_server_cores>, I<element_server_workers>, I<element_server_core_clock>
+
+These options are available over v0.08.
+
+It requires worker side preparation to notice server specification for client like below.
+
+    $ perl -MMapReduce::Framework::Simple -e 'MapReduce::Framework::Simple->new(server_spec => {cores => 4, clock => 2400})->worker("/eval",10,5000)'
+
+Please give correct server specification in new(server_spec => {}) when you use 'element_server_cores' or 'element_server_core_clock'.
+Then you can distribute the data by computing power of workers.
 
 =head2 I<map_reduce>
 
