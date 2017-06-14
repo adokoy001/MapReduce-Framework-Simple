@@ -9,8 +9,14 @@ use Parallel::ForkManager;
 use Plack::Request;
 use WWW::Mechanize;
 use List::Util qw(shuffle);
+use Data::Serializer;
+use Storable;
+no warnings qw(once);
+$Storable::Deparse = 1;
+$Storable::Eval = 1;
+use warnings;
 
-our $VERSION = "0.08";
+our $VERSION = "0.09";
 
 has 'verify_hostname' => (is => 'rw', isa => 'Int', default => 1);
 has 'skip_undef_result' => (is => 'rw', isa => 'Int', default => 1);
@@ -151,6 +157,10 @@ sub map_reduce {
     if(defined($options) and defined($options->{remote})){
 	$remote_flg = $options->{remote};
     }
+    my $storable_flg = 0;
+    if(defined($options) and defined($options->{storable})){
+	$storable_flg = $options->{storable};
+    }
     my $stringified_code = B::Deparse->new->coderef2text($mapper_ref);
     my $result;
     my $succeeded_remotes;
@@ -158,6 +168,15 @@ sub map_reduce {
     my $failed_data;
     my $discarded_data;
     my $pm = Parallel::ForkManager->new($max_proc);
+
+    my $ds;
+    if($storable_flg == 1){
+	$ds = Data::Serializer->new(
+	    serializer => 'Storable',
+	    compress => 1
+	   );
+    }
+
     $pm->run_on_finish(
 	sub {
 	    my ($pid, $exit_code, $ident, $exit_signal, $core_dump, $data_structure) = @_;
@@ -176,21 +195,40 @@ sub map_reduce {
     if($remote_flg == 1){
 	for(my $k=0; $k <= $#$data; $k++){
 	    $pm->start and next;
-	    my $payload = _perl_to_msgpack(
-		{
-		    data => $data->[$k]->[0],
-		    code => $stringified_code
-		   }
-	       );
+	    my $payload;
+	    if($storable_flg == 1){
+		$payload = $ds->serialize(
+		    {
+			data => $data->[$k]->[0],
+			code => $stringified_code
+		       }
+		   );
+	    }else{
+		$payload = _perl_to_msgpack(
+		    {
+			data => $data->[$k]->[0],
+			code => $stringified_code
+		       }
+		   );
+	    }
+	    my $path_add = '';
+	    if($storable_flg == 1){ $path_add = '/STORABLE'; };
+	    my $content_type_name = 'application/x-msgpack; charset=x-user-defined';
+	    if($storable_flg == 1){ $content_type_name = 'application/octet-stream; charset=x-user-defined'; };
 	    my $result_chil_from_remote = _post_content(
-		$data->[$k]->[1],
-		'application/x-msgpack; charset=x-user-defined',
+		$data->[$k]->[1].$path_add,
+		$content_type_name,
 		$payload,
 		$self->verify_hostname
 	       );
 	    my $result_with_id;
 	    if($result_chil_from_remote->{is_success}){
-		my $result_chil = _msgpack_to_perl($result_chil_from_remote->{res});
+		my $result_chil;
+		if($storable_flg == 1){
+		    $result_chil = $ds->deserialize($result_chil_from_remote->{res});
+		}else{
+		    $result_chil = _msgpack_to_perl($result_chil_from_remote->{res});
+		}
 		$result_with_id = {id => $k, result => $result_chil->{result}, remote => $data->[$k]->[1], is_success => 1};
 	    }else{
 		$result_with_id = {id => $k, remote => $data->[$k]->[0], is_success => 0, failed_data => $data->[$k]};
@@ -231,22 +269,42 @@ sub map_reduce {
 
 	for(my $k=0; $k <= $#$failed_data; $k++){
 	    $pm2->start and next;
-	    my $payload = _perl_to_msgpack(
+	    my $payload;
+	    if($storable_flg == 1){
+		$payload = $ds->serialize(
 		{
 		    data => $failed_data->[$k]->[0],
 		    code => $stringified_code
 		   }
 	       );
+	    }else{
+		$payload = _perl_to_msgpack(
+		    {
+			data => $failed_data->[$k]->[0],
+			code => $stringified_code
+		       }
+		   );
+	    }
+
+	    my $path_add = '';
+	    if($storable_flg == 1){ $path_add = '/STORABLE' };
+	    my $content_type_name = 'application/x-msgpack; charset=x-user-defined';
+	    if($storable_flg == 1){ $content_type_name = 'application/octet-stream; charset=x-user-defined'; };
 	    my $rand_remote = $succeeded_remotes_list[int(rand($#succeeded_remotes_list))];
 	    my $result_chil_from_remote = _post_content(
-		$rand_remote,
-		'application/x-msgpack; charset=x-user-defined',
+		$rand_remote.$path_add,
+		$content_type_name,
 		$payload,
 		$self->verify_hostname
 	       );
 	    my $result_with_id;
 	    if($result_chil_from_remote->{is_success}){
-		my $result_chil = _msgpack_to_perl($result_chil_from_remote->{res});
+		my $result_chil;
+		if($storable_flg == 1){
+		    $result_chil = $ds->deserialize($result_chil_from_remote->{res});
+		}else{
+		    $result_chil = _msgpack_to_perl($result_chil_from_remote->{res});
+		}
 		$result_with_id = {id => $#$data + $k, result => $result_chil->{result}, remote => $rand_remote, is_success => 1};
 	    }else{
 		$result_with_id = {id => $#$data + $k, remote => $rand_remote, is_success => 0, failed_data => $failed_data->[$k]};
@@ -358,7 +416,24 @@ sub load_worker_plack_app {
 		$server_spec->{path} = $self->{path};
 
 		return [200,['Content-Type' => 'application/x-msgpack; charset=x-user-defined'],[_perl_to_msgpack({server_spec => $server_spec})]];
-	    }
+	    },
+	    $path.'/STORABLE' => sub {
+		my $ds = Data::Serializer->new(
+		    serializer => 'Storable',
+		    compress => 1
+		   );
+		my $msg_req = $req->content //
+		    return [400,['Content-Type' => 'text/plain'],['Content body required.']];
+		my $perl_req = $ds->deserialize($msg_req) //
+		    return [400,['Content-Type' => 'text/plain'],['Valid MessagePack required']];
+		my $data = $perl_req->{data};
+		my $code_text = $perl_req->{code};
+		my $code_ref;
+		eval('$code_ref = sub '.$code_text.';');
+		my $result_pre = $code_ref->($data);
+		my $result = $ds->serialize({result => $result_pre});
+		return [200,['Content-Type' => 'application/octet-stream; charset=x-user-defined'],[$result]];
+	    },
 	   };
 	if($self->worker_log == 1){
 	    print "END,$$,".$req->address.',';
@@ -555,6 +630,7 @@ I<new> creates object.
         die_discarded_data => 0 # die if discarded data exist.
         worker_log => 0 # print worker log when remote client accesses.
         force_plackup => 0 # force to use plackup when starting worker server.
+        server_spec => {cores => 4, clock => 2400} # since v0.08, you can give the machine spec.
         );
 
 =head2 I<create_assigned_data>
@@ -617,7 +693,10 @@ I<map_reduce> method starts MapReduce processing using Parallel::ForkManager.
         $mapper, # code ref of mapper
         $reducer, # code ref of reducer
         5, # number of fork process
-        {remote => 1} # grid computing flag.
+        {
+          remote => 1,  # grid computing flag.
+          storable => 1 # since v0.09, this option enables to insert any objects and code ref by using Storable module.
+         }
        );
 
 =head2 I<worker>
@@ -648,6 +727,104 @@ If you want to use other HTTP server, you can extract Plack app by I<load_worker
 Example one liner deploy code below (with Starlight the pure Perl pre-fork HTTP server).
 
     $ perl -MMapReduce::Framework::Simple -MPlack::Loader -e 'Plack::Loader->load("Starlight", port => 12345)->run(MapReduce::Framework::Simple->new->load_worker_plack_app("/eval_secret"))'
+
+=head1 OBJECT AND CODEREF IN DATA
+
+Since v0.09, you can enable to insert CODE references and almost all of objects to data by setting storable option to 1 in map_reduce method.
+
+    ...
+
+    my $data_tmp = [
+        [[1,2,3],$obj,sub { return "hello" }],
+        [[4,5,6],$obj2,sub { return "world" }],
+        ...
+        ];
+
+    ...
+
+    my $result = $mfs->map_reduce(
+        $data,
+        $mapper,
+        $reducer,
+        5,
+        {storable => 1}
+    );
+
+
+You should use other than 'volume_uniform' method in create_assigned_data.
+
+Here is an complete example.
+
+    # Preparation of worker side:
+    # $ perl -MMapReduce::Framework::Simple -MPDL -e 'MapReduce::Framework::Simple->new->worker('/secret_eval')'
+
+    use strict;
+    use warnings;
+    use MapReduce::Framework::Simple;
+    use PDL;
+
+    my $mfs = MapReduce::Framework::Simple->new();
+    my $server_list = [
+        'http://w1.example.com:5000/secret_eval',
+        'http://w2.example.com:5000/secret_eval'
+    ];
+
+    # creating many PDL objects.
+    my $data_tmp;
+    for(0 .. 100){
+        my $tmp_mat;
+        for(1 .. 20){
+            my $tmp_vec;
+            for(1 .. 20){
+                push(@$tmp_vec,rand(100));
+            }
+            push(@$tmp_mat,$tmp_vec);
+        }
+        push(@$data_tmp, pdl $tmp_mat);
+    }
+
+    my $data = $mfs->create_assigned_data(
+        $data_tmp,
+        $server_list,
+        {
+            chunk_num => 10,
+            method => 'element_sequential' # SHOULD BE SET. SHOULD NOT BE 'volume_uniform'
+           }
+       );
+
+    # mapper code
+    my $mapper = sub {
+        my $input = shift;
+        my $output;
+        for(0 .. $#$input){
+            my $pdl = $input->[$_];
+            my $inv = $pdl->inv;
+            push(@$output,$inv);
+        }
+        return($output);
+    };
+
+    # reducer code
+    my $reducer = sub {
+        my $input = shift;
+        return($input);
+    };
+
+    my $result = $mfs->map_reduce(
+        $data,
+        $mapper,
+        $reducer,
+        10,
+        {storable => 1} # SHOULD BE SET storable => 1
+       );
+
+
+    for(0 .. $#$result){
+        my $tmp_result = $result->[$_];
+        foreach my $pdl (@$tmp_result){
+            print $pdl;
+        }
+    }
 
 
 =head1 PERFORMANCE

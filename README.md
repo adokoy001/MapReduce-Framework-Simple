@@ -112,6 +112,7 @@ _new_ creates object.
         die_discarded_data => 0 # die if discarded data exist.
         worker_log => 0 # print worker log when remote client accesses.
         force_plackup => 0 # force to use plackup when starting worker server.
+        server_spec => {cores => 4, clock => 2400} # since v0.08, you can give the machine spec.
         );
 
 ## _create\_assigned\_data_
@@ -173,7 +174,10 @@ _map\_reduce_ method starts MapReduce processing using Parallel::ForkManager.
         $mapper, # code ref of mapper
         $reducer, # code ref of reducer
         5, # number of fork process
-        {remote => 1} # grid computing flag.
+        {
+          remote => 1,  # grid computing flag.
+          storable => 1 # since v0.09, this option enables to insert any objects and code ref by using Storable module.
+         }
        );
 
 ## _worker_
@@ -204,6 +208,103 @@ If you want to use other HTTP server, you can extract Plack app by _load\_worker
 Example one liner deploy code below (with Starlight the pure Perl pre-fork HTTP server).
 
     $ perl -MMapReduce::Framework::Simple -MPlack::Loader -e 'Plack::Loader->load("Starlight", port => 12345)->run(MapReduce::Framework::Simple->new->load_worker_plack_app("/eval_secret"))'
+
+# OBJECT AND CODEREF IN DATA
+
+Since v0.09, you can enable to insert CODE references and almost all of objects to data by setting storable option to 1 in map\_reduce method.
+
+    ...
+
+    my $data_tmp = [
+        [[1,2,3],$obj,sub { return "hello" }],
+        [[4,5,6],$obj2,sub { return "world" }],
+        ...
+        ];
+
+    ...
+
+    my $result = $mfs->map_reduce(
+        $data,
+        $mapper,
+        $reducer,
+        5,
+        {storable => 1}
+    );
+
+You should use other than 'volume\_uniform' method in create\_assigned\_data.
+
+Here is an complete example.
+
+    # Preparation of worker side:
+    # $ perl -MMapReduce::Framework::Simple -MPDL -e 'MapReduce::Framework::Simple->new->worker('/secret_eval')'
+
+    use strict;
+    use warnings;
+    use MapReduce::Framework::Simple;
+    use PDL;
+
+    my $mfs = MapReduce::Framework::Simple->new();
+    my $server_list = [
+        'http://w1.example.com:5000/secret_eval',
+        'http://w2.example.com:5000/secret_eval'
+    ];
+
+    # creating many PDL objects.
+    my $data_tmp;
+    for(0 .. 100){
+        my $tmp_mat;
+        for(1 .. 20){
+            my $tmp_vec;
+            for(1 .. 20){
+                push(@$tmp_vec,rand(100));
+            }
+            push(@$tmp_mat,$tmp_vec);
+        }
+        push(@$data_tmp, pdl $tmp_mat);
+    }
+
+    my $data = $mfs->create_assigned_data(
+        $data_tmp,
+        $server_list,
+        {
+            chunk_num => 10,
+            method => 'element_sequential' # SHOULD BE SET. SHOULD NOT BE 'volume_uniform'
+           }
+       );
+
+    # mapper code
+    my $mapper = sub {
+        my $input = shift;
+        my $output;
+        for(0 .. $#$input){
+            my $pdl = $input->[$_];
+            my $inv = $pdl->inv;
+            push(@$output,$inv);
+        }
+        return($output);
+    };
+
+    # reducer code
+    my $reducer = sub {
+        my $input = shift;
+        return($input);
+    };
+
+    my $result = $mfs->map_reduce(
+        $data,
+        $mapper,
+        $reducer,
+        10,
+        {storable => 1} # SHOULD BE SET storable => 1
+       );
+
+
+    for(0 .. $#$result){
+        my $tmp_result = $result->[$_];
+        foreach my $pdl (@$tmp_result){
+            print $pdl;
+        }
+    }
 
 # PERFORMANCE
 
